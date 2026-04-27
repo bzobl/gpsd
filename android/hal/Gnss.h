@@ -8,7 +8,7 @@
 #include <mutex>
 #include <thread>
 #include "GnssConfiguration.h"
-#include "gps.h"
+#include "include/gps.h"
 
 namespace android {
 namespace hardware {
