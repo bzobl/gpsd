@@ -56,90 +56,105 @@
 //}
 
 cc_library_shared {
-	name: "libgps",
-	vendor: true,
-	export_include_dirs: ["."],
-	generated_headers: [
-		"gpsd_config_h",
-		"gpsd_packet_names_h"
-	],
-	generated_sources: ["gps_maskdump_c"],
-	srcs: [
-		"bits.c",
-		"gpsdclient.c",
-		"gpsutils.c",
-		"hex.c",
-		"json.c",
-		"libgps_core.c",
-		"libgps_dbus.c",
-		"libgps_json.c",
-		"libgps_shm.c",
-		"libgps_sock.c",
-		"netlib.c",
-		"os_compat.c",
-		"rtcm2_json.c",
-		"rtcm3_json.c",
-		"shared_json.c"
-	],
-	cflags: [
-		"-Wno-unused-variable",
-		"-Wno-unused-parameter",
-		"-Wno-missing-field-initializers",
-	],
+  name: "libgps",
+  vendor: true,
+  export_include_dirs: ["."],
+  generated_headers: [
+    "gpsd_config_h",
+    "gpsd_packet_names_h",
+    "ais_json_i",
+  ],
+  generated_sources: [
+    "gps_maskdump_c"
+  ],
+  srcs: [
+    "libgps/ais_json.c",
+    "libgps/bits.c",
+    "libgps/gpsdclient.c",
+    "libgps/gpsutils.c",
+    "libgps/hex.c",
+    "libgps/json.c",
+    "libgps/libgps_core.c",
+    "libgps/libgps_dbus.c",
+    "libgps/libgps_json.c",
+    "libgps/libgps_shm.c",
+    "libgps/libgps_sock.c",
+    "libgps/netlib.c",
+    "libgps/ntpshmread.c",
+    "libgps/os_compat.c",
+    "libgps/rtcm2_json.c",
+    "libgps/rtcm3_json.c",
+    "libgps/shared_json.c",
+    "libgps/timespec_str.c",
+  ],
+  cflags: [
+    "-Wno-unused-variable",
+    "-Wno-unused-parameter",
+    "-Wno-missing-field-initializers",
+  ],
 }
 
 cc_library_static {
-        name: "libgps_static",
-        vendor: true,
-        export_include_dirs: ["."],
-	generated_headers: [
-		"gpsd_config_h",
-		"gpsd_packet_names_h"
-	],
-	generated_sources: ["gps_maskdump_c"],
-        srcs: [
-                "bits.c",
-                "gpsdclient.c",
-                "gpsutils.c",
-                "hex.c",
-                "json.c",
-                "libgps_core.c",
-                "libgps_dbus.c",
-                "libgps_json.c",
-                "libgps_shm.c",
-                "libgps_sock.c",
-                "netlib.c",
-                "os_compat.c",
-                "rtcm2_json.c",
-                "rtcm3_json.c",
-                "shared_json.c"
-        ],
-        cflags: [
-                "-Wno-unused-variable",
-                "-Wno-unused-parameter",
-                "-Wno-missing-field-initializers",
-        ],
+  name: "libgps_static",
+  vendor: true,
+  export_include_dirs: ["."],
+  generated_headers: [
+    "gpsd_config_h",
+    "gpsd_packet_names_h",
+    "ais_json_i",
+  ],
+  generated_sources: [
+    "gps_maskdump_c",
+  ],
+  srcs: [
+    "libgps/ais_json.c",
+    "libgps/bits.c",
+    "libgps/gpsdclient.c",
+    "libgps/gpsutils.c",
+    "libgps/hex.c",
+    "libgps/json.c",
+    "libgps/libgps_core.c",
+    "libgps/libgps_dbus.c",
+    "libgps/libgps_json.c",
+    "libgps/libgps_shm.c",
+    "libgps/libgps_sock.c",
+    "libgps/netlib.c",
+    "libgps/ntpshmread.c",
+    "libgps/os_compat.c",
+    "libgps/rtcm2_json.c",
+    "libgps/rtcm3_json.c",
+    "libgps/shared_json.c",
+    "libgps/timespec_str.c",
+  ],
+  cflags: [
+    "-Wno-unused-variable",
+    "-Wno-unused-parameter",
+    "-Wno-missing-field-initializers",
+  ],
 }
+
+// The following rules emulate tasks found in SConscript
 
 genrule {
 	name: "gpsd_packet_names_h",
 	cmd: "rm -f $(out); sed -e '/^ *\\([A-Z][A-Z0-9_]*\\)," +
 		"/s//   \"\\1\",/' < $(in) > $(out)",
-	srcs: ["packet_states.h"],
-	out: ["packet_names.h"]
+	srcs: ["include/packet_states.h"],
+	out: ["include/packet_names.h"]
 }
 
 genrule {
 	name: "gpsd_config_h",
-	cmd: "cat $(in)/android/gpsd_config.in > $(out);" +
-		"grep \"^gpsd_version\" $(in)/SConstruct | " +
+	cmd: "cat $(in) > $(out);" +
+    "SCONSTRUCT_PATH=\"$$(dirname $(in))/../SConstruct\"" +
+		"grep \"^gpsd_version\" $$SCONSTRUCT_PATH | " +
 		"cut -d\\= -f2 | sed -e 's/^/#define VERSION/'" +
 		">> $(out); " +
-		"grep \"^gpsd_version\" $(in)/SConstruct | " +
+		"grep \"^gpsd_version\" $$SCONSTRUCT_PATH | " +
 		"cut -d\\= -f2 | sed -e 's/^/#define RELEASE/'" +
 		">> $(out)",
-	srcs: [""],
-	out: ["gpsd_config.h"]
+	srcs: ["android/gpsd_config.in"],
+	out: ["include/gpsd_config.h"]
 }
 
 python_binary_host {
@@ -149,13 +164,27 @@ python_binary_host {
 }
 
 genrule {
-	name: "gps_maskdump_c",
-	tools: ["maskaudit"],
-	cmd: "$(location maskaudit) -c $(in) > $(out)",
-	out: ["gps_maskdump.c"],
-	srcs: [""]
+  name: "gps_maskdump_c",
+  tools: ["maskaudit"],
+  cmd: "$(location maskaudit) -c $$(dirname $(in)) > $(out);" +
+       "sed -i 's_^#include \"\\.\\./\\(include/.*\\)_#include \"\\1_' $(out)",
+  out: ["gps_maskdump.c"],
+  // using SConstruct to get the toplevel directory
+  srcs: ["SConstruct"]
 }
 
+python_binary_host {
+  name: "jsongen",
+  main: "libgps/jsongen.py",
+  srcs: ["libgps/jsongen.py"]
+}
+
+genrule {
+  name: "ais_json_i",
+  tools: ["jsongen"],
+  cmd: "$(location jsongen) --ais --target=parser > $(out)",
+  out: ["ais_json.i"],
+  srcs: []
 }
 
 //cc_library_static {
