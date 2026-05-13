@@ -25,7 +25,7 @@
 
 #define CLIMB 3
 
-#include "../include/gpsd_config.h"  // must be before all includes
+#include "include/gpsd_config.h"  // must be before all includes
 #include "../include/gpsd.h"
 
 #include <arpa/inet.h>

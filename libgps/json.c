@@ -62,7 +62,7 @@ PERMISSIONS
    SPDX-License-Identifier: BSD-2-clause
 
 ***************************************************************************/
-#include "../include/gpsd_config.h"  // must be before all includes
+#include "include/gpsd_config.h"  // must be before all includes
 
 #include <ctype.h>
 #include <math.h>       // for HUGE_VAL

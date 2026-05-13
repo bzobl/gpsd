@@ -7,7 +7,7 @@
  *
  */
 
-#include "../include/gpsd_config.h"  // must be before all includes
+#include "include/gpsd_config.h"  // must be before all includes
 
 #include <errno.h>                   // for errno
 #ifdef HAVE_GETOPT_LONG

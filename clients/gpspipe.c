@@ -25,7 +25,7 @@
 
 #undef USE_QT       // this progtam does not work with QT. Pacify Codacy
 
-#include "../include/gpsd_config.h"  // must be before all includes
+#include "include/gpsd_config.h"  // must be before all includes
 
 #include <errno.h>
 #include <fcntl.h>

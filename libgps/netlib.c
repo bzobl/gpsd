@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: BSD-2-clause
  */
 
-#include "../include/gpsd_config.h"   // must be before all includes
+#include "include/gpsd_config.h"   // must be before all includes
 
 #ifdef HAVE_ARPA_INET_H
 #  include <arpa/inet.h>              // for htons() and friends

@@ -5,7 +5,7 @@
  *
  */
 
-#include "../include/gpsd_config.h"  /* must be before all includes */
+#include "include/gpsd_config.h"  /* must be before all includes */
 
 #ifdef HAVE_GETOPT_LONG
        #include <getopt.h>

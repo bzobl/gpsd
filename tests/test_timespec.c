@@ -7,7 +7,7 @@
  *
  */
 /* first so the #defs work */
-#include "../include/gpsd_config.h"
+#include "include/gpsd_config.h"
 
 #include <math.h>
 #include <stdbool.h>

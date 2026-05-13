@@ -7,7 +7,7 @@
  * This simple program shows the basic functionality of the C++ wrapper class
  */
 
-#include "../include/gpsd_config.h"  // must be before all includes
+#include "include/gpsd_config.h"  // must be before all includes
 
 #include <getopt.h>
 #include <iostream>

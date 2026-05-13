@@ -73,7 +73,7 @@
    COMPASS mode. */
 #define MIN_COMPASS_DATAWIN_YSIZE (DATAWIN_COMPASS_FIELDS + DATAWIN_OVERHEAD)
 
-#include "../include/gpsd_config.h"    // must be before all includes
+#include "include/gpsd_config.h"    // must be before all includes
 
 #include <ctype.h>
 #include <curses.h>

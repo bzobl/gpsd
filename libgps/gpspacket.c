@@ -6,7 +6,7 @@
  *
  */
 
-#include "../include/gpsd_config.h"  // must be before all includes
+#include "include/gpsd_config.h"  // must be before all includes
 
 #include <stdio.h>
 #include <stdlib.h>

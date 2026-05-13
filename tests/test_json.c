@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-clause
  */
 
-#include "../include/gpsd_config.h"
+#include "include/gpsd_config.h"
 
 #include <getopt.h>
 #include <stddef.h>

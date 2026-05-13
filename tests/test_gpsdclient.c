@@ -7,7 +7,7 @@
  * SPDX-License-Identifier: BSD-2-clause
 */
 
-#include "../include/gpsd_config.h"    // first so the #ifdefs work
+#include "include/gpsd_config.h"    // first so the #ifdefs work
 
 #include <math.h>                      // for nan()
 #include <stdio.h>

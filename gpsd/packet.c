@@ -30,7 +30,7 @@ PERMISSIONS
 
 ***************************************************************************/
 
-#include "../include/gpsd_config.h"  // must be before all includes
+#include "include/gpsd_config.h"  // must be before all includes
 
 #include <arpa/inet.h>          // for htons()
 #include <ctype.h>

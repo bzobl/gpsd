@@ -9,7 +9,7 @@
  * NTRIP is not an open protocol.  So this file is based on guesswork.
  */
 
-#include "../include/gpsd_config.h"  // must be before all includes
+#include "include/gpsd_config.h"  // must be before all includes
 
 #include <errno.h>
 #include <fcntl.h>

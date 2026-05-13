@@ -12,7 +12,7 @@
  *
  */
 
-#include "../include/gpsd_config.h"  // must be before all includes
+#include "include/gpsd_config.h"  // must be before all includes
 
 #include <arpa/inet.h>
 #include <assert.h>

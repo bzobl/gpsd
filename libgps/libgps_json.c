@@ -19,7 +19,7 @@ PERMISSIONS
  * use isfinite() to make sure a float or double is valid
  */
 
-#include "../include/gpsd_config.h"   // must be before all includes
+#include "include/gpsd_config.h"   // must be before all includes
 
 #include <assert.h>                  // for assert()  :-(
 #include <math.h>

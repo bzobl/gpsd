@@ -11,7 +11,7 @@
 #define DBUS_PSEUDO_FD  -2
 
 #include "gps.h"
-#include "gpsd_config.h"
+#include "include/gpsd_config.h"
 #include "compiler.h"
 
 #ifdef __cplusplus

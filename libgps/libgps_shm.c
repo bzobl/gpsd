@@ -15,7 +15,7 @@ PERMISSIONS
 
 ***************************************************************************/
 
-#include "../include/gpsd_config.h"
+#include "include/gpsd_config.h"
 
 #ifdef SHM_EXPORT_ENABLE
 
