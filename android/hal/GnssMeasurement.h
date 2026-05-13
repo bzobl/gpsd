@@ -4,6 +4,7 @@
 #include <android/hardware/gnss/1.1/IGnssMeasurement.h>
 #include <hidl/MQDescriptor.h>
 #include <hidl/Status.h>
+#include <mutex>
 
 namespace android {
 namespace hardware {
@@ -31,6 +32,10 @@ struct GnssMeasurement : public IGnssMeasurement {
                     bool enableFullTracking) override;
 
     // Methods from ::android::hidl::base::V1_0::IBase follow.
+
+   private:
+    mutable std::mutex mMutex;
+    static sp<::android::hardware::gnss::V1_1::IGnssMeasurementCallback> sGnssMeasurementCallback;
 };
 
 }  // namespace implementation

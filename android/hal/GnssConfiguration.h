@@ -56,7 +56,6 @@ struct GnssConfiguration : public IGnssConfiguration {
     Return<bool> setBlacklist(const hidl_vec<BlacklistedSource>& blacklist) override;
 
     Return<bool> isBlacklisted(const GnssSvInfo& gnssSvInfo) const;
-    std::recursive_mutex& getMutex() const;
 
    private:
     BlacklistedSourceSet mBlacklistedSourceSet;

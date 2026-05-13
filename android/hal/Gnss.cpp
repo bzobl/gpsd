@@ -9,7 +9,8 @@
 #include <time.h>
 
 #include "Gnss.h"
-#include "GnssMeasurement.h"
+
+#include "include/timespec.h"
 
 namespace android {
 namespace hardware {
@@ -19,12 +20,12 @@ namespace implementation {
 
 using GnssSvFlags = IGnssCallback::GnssSvFlags;
 
-const uint32_t MIN_INTERVAL_MILLIS = 100;
 sp<::android::hardware::gnss::V1_1::IGnssCallback> Gnss::sGnssCallback = nullptr;
 
 Gnss::Gnss() :
     mMinIntervalMs(1000),
     mGnssConfiguration{new GnssConfiguration()},
+    mGnssMeasurement{new GnssMeasurement()},
     mIsActive(false) {}
 
 Gnss::~Gnss() {
@@ -41,6 +42,8 @@ Return<bool> Gnss::setCallback(const sp<::android::hardware::gnss::V1_0::IGnssCa
 }
 
 Return<bool> Gnss::start() {
+    ALOGD("Gnss::start");
+
     if (mIsActive) {
         ALOGW("Gnss has started. Restarting...");
         stop();
@@ -48,6 +51,11 @@ Return<bool> Gnss::start() {
 
     mIsActive = true;
     mThread = std::thread([this]() {
+
+        std::ostringstream oss;
+        oss << std::this_thread::get_id();
+        ALOGE("GPS THREAD STARTING %s", oss.str().c_str());
+
         struct gps_data_t gps_data;
         int gpsopen = -1;
         char gpsdhost[PROP_VALUE_MAX];
@@ -60,19 +68,20 @@ Return<bool> Gnss::start() {
         char dtos[100];
         GnssLocation location = {};
         bool have_automotive_location = false;
+        time_t last_report_ms = 0;
 
         // Normally, GPSd will be running on localhost, but we can set a system property
         // "service.gpsd.host" to some other hostname in order to open a GPSd instance
         // running on a different host.
         property_get("service.gpsd.host", gpsdhost, "localhost");
-	property_get("service.gpsd.port", gpsdport, "2947");
+        property_get("service.gpsd.port", gpsdport, "2947");
         is_automotive = (property_get("service.gpsd.automotive", gpsdauto, "") > 0);
 
         // Load coordinates stored in persist properties as current location
         // This is to provide instantaneous fix to the last good location
         // in order to provide instantaneous ability to begin navigator routing.
-	if (is_automotive && property_get("persist.service.gpsd.latitude", gpslat, "") > 0
-                    && property_get("persist.service.gpsd.longitude", gpslon, "") > 0){
+      if (is_automotive && property_get("persist.service.gpsd.latitude", gpslat, "") > 0
+                        && property_get("persist.service.gpsd.longitude", gpslon, "") > 0){
             location = {
                      .gnssLocationFlags = 0xDD,
                      .latitudeDegrees = atof(gpslat),
@@ -96,219 +105,351 @@ Return<bool> Gnss::start() {
             // Note the continue; statement that will skip the reading in the
             // event that the connection to GPSd cannot be established.
             if (gpsopen != 0){
-		ALOGD("%s: gpsd_host: %s, gpsd_port: %s", __func__, gpsdhost, gpsdport);
+                ALOGD("%s: gpsd_host: %s, gpsd_port: %s", __func__, gpsdhost, gpsdport);
                 if ((gpsopen = gps_open(gpsdhost, gpsdport, &gps_data)) == 0){
-		    ALOGD("%s: gps_open SUCCESS", __func__);
-                    gps_stream(&gps_data, WATCH_ENABLE, NULL);
+                    ALOGD("%s: gps_open SUCCESS", __func__);
+                    if (gps_stream(&gps_data, WATCH_ENABLE, NULL) != 0) {
+                      ALOGW("gps_stream failed: %s", strerror(errno));
+                    }
                 } else {
-		    ALOGD("%s: gps_open FAIL (%d). Trying again in 5 seconds.", __func__, gpsopen);
+                    ALOGW("%s: gps_open FAIL (%d). Trying again in 5 seconds.", __func__, gpsopen);
                     sleep(5);
                     continue;
                 }
             }
 
+
             // Wait for data from gpsd, then process it.
+            ALOGD("waiting for data...");
             if (gps_waiting (&gps_data, 2000000)) {
                 errno = 0;
                 if (gps_read (&gps_data, NULL, 0) != -1) {
+                    ALOGD("set=0x%012lx, set_pending=0x%012lx. "
+                            "Fix: status=%d, mode=%d, time=%ld, lat=%e, lon=%e, alt=%e, speed=%e, track=%e "
+                          "Accuracy: h=%e, v=%e, speed=%e, track=%e "
+                          "using %d/%d satellites. device used %.128s",
+                          gps_data.set, gps_data.set_pending,
+                          gps_data.fix.status, gps_data.fix.mode, gps_data.fix.time.tv_sec,
+                          gps_data.fix.latitude, gps_data.fix.longitude, gps_data.fix.altHAE,
+                          gps_data.fix.speed, gps_data.fix.track,
+                          gps_data.fix.eph, gps_data.fix.epv, gps_data.fix.eps, gps_data.fix.epd,
+                          gps_data.satellites_used, gps_data.satellites_visible,
+                          gps_data.dev.path);
 
-                    if (gps_data.fix.status >= STATUS_GPS && gps_data.fix.mode >= 2){
+                    if (gps_data.fix.mode >= 2) {
 
-                        // Every 30 seconds, store current coordinates to persist property.
-                        if (is_automotive &&
-                            gps_data.fix.time.tv_sec > last_recorded_fix + 30){
-                            last_recorded_fix = gps_data.fix.time.tv_sec;
-                            snprintf(dtos, sizeof(dtos), "%lf", gps_data.fix.latitude);
-                            property_set("persist.service.gpsd.latitude", dtos);
-                            snprintf(dtos, sizeof(dtos), "%lf", gps_data.fix.longitude);
-                            property_set("persist.service.gpsd.longitude", dtos);
+                        location.gnssLocationFlags = 0;
+                        location.timestamp = 0;
+
+                        if (gps_data.set & TIME_SET) {
+                          location.timestamp = (int64_t)gps_data.fix.time.tv_sec * 1000 +
+                                               gps_data.fix.time.tv_nsec / 1000000;
                         }
 
-                        unsigned short flags =
-                                 V1_0::GnssLocationFlags::HAS_LAT_LONG |
-                                 V1_0::GnssLocationFlags::HAS_SPEED |
-                                 V1_0::GnssLocationFlags::HAS_BEARING |
-                                 V1_0::GnssLocationFlags::HAS_HORIZONTAL_ACCURACY |
-                                 V1_0::GnssLocationFlags::HAS_SPEED_ACCURACY |
-                                 V1_0::GnssLocationFlags::HAS_BEARING_ACCURACY;
+                        if ((gps_data.set & LATLON_SET) && (gps_data.set & HERR_SET)) {
+                          location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_LAT_LONG;
+                          location.latitudeDegrees = gps_data.fix.latitude;
+                          location.longitudeDegrees = gps_data.fix.longitude;
 
-                        location = {
-                                 .latitudeDegrees = (double) gps_data.fix.latitude,
-                                 .longitudeDegrees = (double) gps_data.fix.longitude,
-                                 .speedMetersPerSec = (float) gps_data.fix.speed,
-                                 .bearingDegrees = (float) gps_data.fix.track,
-                                 .horizontalAccuracyMeters = (float) gps_data.fix.eph,
-                                 .speedAccuracyMetersPerSecond = (float) gps_data.fix.eps,
-                                 .bearingAccuracyDegrees = (float) gps_data.fix.epd,
-                                 .timestamp = (int64_t)gps_data.fix.time.tv_sec * 1000 +
-                                              gps_data.fix.time.tv_nsec / 1000000
-                        };
+                          location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_HORIZONTAL_ACCURACY;
+                          location.horizontalAccuracyMeters = gps_data.fix.eph;
 
-                        if (gps_data.fix.mode == 3){
-                            flags |= V1_0::GnssLocationFlags::HAS_ALTITUDE |
-                                    V1_0::GnssLocationFlags::HAS_VERTICAL_ACCURACY;
-
-                            location.altitudeMeters = gps_data.fix.altHAE;
-                            location.verticalAccuracyMeters = gps_data.fix.epv;
+                          // Every 30 seconds, store current coordinates to persist property.
+                          if (is_automotive &&
+                              gps_data.fix.time.tv_sec > last_recorded_fix + 30){
+                              last_recorded_fix = gps_data.fix.time.tv_sec;
+                              snprintf(dtos, sizeof(dtos), "%lf", gps_data.fix.latitude);
+                              property_set("persist.service.gpsd.latitude", dtos);
+                              snprintf(dtos, sizeof(dtos), "%lf", gps_data.fix.longitude);
+                              property_set("persist.service.gpsd.longitude", dtos);
+                          }
                         }
 
-			location.gnssLocationFlags = flags;
 
+                        if ((gps_data.set & SPEED_SET) && (gps_data.set & SPEEDERR_SET)) {
+                          location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_SPEED;
+                          location.speedMetersPerSec = gps_data.fix.speed;
+
+                          location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_SPEED_ACCURACY;
+                          location.speedAccuracyMetersPerSecond = gps_data.fix.eps;
+                        }
+
+                        if ((gps_data.set & TRACK_SET) && (gps_data.set & TRACKERR_SET)) {
+                          location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_BEARING;
+                          location.bearingDegrees = gps_data.fix.track;
+
+                          location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_BEARING_ACCURACY;
+                          location.bearingAccuracyDegrees = gps_data.fix.epd;
+                        }
+
+                        if ((gps_data.set & ALTITUDE_SET) && (gps_data.set & VERR_SET)) {
+                          location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_ALTITUDE;
+                          location.altitudeMeters = gps_data.fix.altHAE;
+
+                          location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_VERTICAL_ACCURACY;
+                          location.verticalAccuracyMeters = gps_data.fix.epv;
+                        }
+
+                        if ((location.timestamp == 0)
+                            ||!(location.gnssLocationFlags & V1_0::GnssLocationFlags::HAS_LAT_LONG)
+                            //|| !(location.gnssLocationFlags & V1_0::GnssLocationFlags::HAS_SPEED)
+                            //|| !(location.gnssLocationFlags & V1_0::GnssLocationFlags::HAS_BEARING)
+                            || !(location.gnssLocationFlags & V1_0::GnssLocationFlags::HAS_ALTITUDE)
+                            //|| !(gps_data.set & SATELLITE_SET)
+                            //|| (gps_data.satellites_used == 0)
+                            ) {
+                          ALOGD("don't have all data, skipping");
+                          continue;
+                        }
+
+                        if ((last_report_ms + mMinIntervalMs) > location.timestamp) {
+                          ALOGD("report too early now: %ld, next report due: %ld",
+                                location.timestamp, last_report_ms + mMinIntervalMs);
+                          continue;
+                        }
+                        last_report_ms = location.timestamp;
+
+                        gps_data.set &= ~(LATLON_SET | HERR_SET | SPEED_SET | SPEEDERR_SET
+                                          | TRACK_SET | TRACKERR_SET | ALTITUDE_SET | VERR_SET
+                                          | TIME_SET);
+                        gps_clear_fix(&gps_data.fix);
                         have_automotive_location = true;
                         this->reportLocation(location);
-                    } else if (is_automotive && have_automotive_location && last_recorded_fix == 0){
-                        location.timestamp = (int64_t)time(NULL) * 1000;
-                        this->reportLocation(location);
+//                   } else if (is_automotive && have_automotive_location && last_recorded_fix == 0){
+//                       location.timestamp = (int64_t)time(NULL) * 1000;
+//                       this->reportLocation(location);
                     }
 
-                    GnssSvStatus svStatus = {};
-                    if (gps_data.satellites_visible > 0) {
-                        svStatus.numSvs = (uint32_t)gps_data.satellites_visible;
-                        const uint32_t maxSvs = (uint32_t)svStatus.gnssSvList.size();
-                        if (svStatus.numSvs > maxSvs) {
-                            svStatus.numSvs = maxSvs;
-                        }
-                    }
-                    for (uint32_t i = 0; i < svStatus.numSvs; i++){
-                        GnssConstellationType constellation_type = GnssConstellationType::UNKNOWN;
-                        switch (gps_data.skyview[i].gnssid){
-                            case 0:
-                                constellation_type = GnssConstellationType::GPS;
-                                break;
-                            case 1:
-                                constellation_type = GnssConstellationType::SBAS;
-                                break;
-                            case 2:
-                                constellation_type = GnssConstellationType::GALILEO;
-                                break;
-                            case 3:
-                                constellation_type = GnssConstellationType::BEIDOU;
-                                break;
-                            case 4:
-                                constellation_type = GnssConstellationType::UNKNOWN;
-                                break;
-                            case 5:
-                                constellation_type = GnssConstellationType::QZSS;
-                                break;
-                            case 6:
-                                constellation_type = GnssConstellationType::GLONASS;
-                                break;
-                        }
-                        svStatus.gnssSvList[i] = getSvInfo(
-                                    gps_data.skyview[i].svid,
-                                    constellation_type,
-                                    gps_data.skyview[i].ss,
-                                    gps_data.skyview[i].elevation,
-                                    gps_data.skyview[i].azimuth,
-                                    gps_data.skyview[i].used
-                                );
+                    if ((gps_data.set & SATELLITE_SET) && (gps_data.satellites_visible > 0)) {
+                        GnssSvStatus svStatus = { };
+                        memset(&svStatus, 0, sizeof(svStatus));
 
-			svStatus.gnssSvList[i].svFlag = 0;
-                        if (gps_data.skyview[i].used == 1) svStatus.gnssSvList[i].svFlag |= GnssSvFlags::USED_IN_FIX;
-
-                        if (gps_data.skyview[i].elevation > -91 && gps_data.skyview[i].azimuth > -1){
-                            svStatus.gnssSvList[i].svFlag |= GnssSvFlags::HAS_ALMANAC_DATA;
-                            if (gps_data.skyview[i].ss > 0)
-                                svStatus.gnssSvList[i].svFlag |= GnssSvFlags::HAS_EPHEMERIS_DATA;
+                        svStatus.numSvs = gps_data.satellites_visible;
+                        if (svStatus.numSvs > svStatus.gnssSvList.size()) {
+                            svStatus.numSvs = svStatus.gnssSvList.size();
                         }
-                    }
-                    this->reportSvStatus(svStatus);
-                }
+
+                      for (uint32_t i = 0; i < svStatus.numSvs; i++){
+                          GnssSvInfo &sv_info = svStatus.gnssSvList[i];
+                          const satellite_t &sat = gps_data.skyview[i];
+
+                          ALOGD("Satelite[%d] svid=0x%02x, constellation=%d, used=%s, "
+                                "elevation=%f, azimuth=%f, SNR=%f, carrier freq=%d",
+                                i, sat.svid, sat.gnssid, sat.used ? "yes" : "no",
+                                sat.elevation, sat.azimuth, sat.ss, sat.freqid);
+
+                          sv_info.svid = sat.svid;
+                          switch (sat.gnssid) {
+                              case GNSSID_GPS:
+                                  sv_info.constellation = GnssConstellationType::GPS;
+                                  if ((sv_info.svid < 1) || (sv_info.svid > 32)) {
+                                    ALOGW("svid 0x%02x for GPS out of range", sv_info.svid);
+                                  }
+                                  break;
+                              case GNSSID_SBAS:
+                                  sv_info.constellation = GnssConstellationType::SBAS;
+                                  if ((sv_info.svid < 120) || (sv_info.svid > 192)
+                                      || ((sv_info.svid > 151) && (sv_info.svid < 183))) {
+                                    ALOGW("svid 0x%02x for SBAS out of range", sv_info.svid);
+                                  }
+                                  break;
+                              case GNSSID_GAL:
+                                  sv_info.constellation = GnssConstellationType::GALILEO;
+                                  if ((sv_info.svid < 1) || (sv_info.svid > 36)) {
+                                    ALOGW("svid 0x%02x for GALILEO out of range", sv_info.svid);
+                                  }
+                                  break;
+                              case GNSSID_BD:
+                                  sv_info.constellation = GnssConstellationType::BEIDOU;
+                                  if ((sv_info.svid < 1) || (sv_info.svid > 37)) {
+                                    ALOGW("svid 0x%02x for BEIDOU out of range", sv_info.svid);
+                                  }
+                                  break;
+                              case GNSSID_QZSS:
+                                  sv_info.constellation = GnssConstellationType::QZSS;
+                                  if ((sv_info.svid < 193) || (sv_info.svid > 200)) {
+                                    ALOGW("svid 0x%02x for QZSS out of range", sv_info.svid);
+                                  }
+                                  break;
+                              case GNSSID_GLO:
+                                  sv_info.constellation = GnssConstellationType::GLONASS;
+                                  if ((sv_info.svid < 1) || (sv_info.svid > 106)
+                                      || ((sv_info.svid > 24) && (sv_info.svid < 93))) {
+                                    ALOGW("svid 0x%02x for GLONASS out of range", sv_info.svid);
+                                  }
+                                  break;
+                              case GNSSID_IMES:
+                              case GNSSID_IRNSS:
+                              case GNSSID_CNT:
+                              default:
+                                  ALOGW("satellite with unknown constellation %d", sat.gnssid);
+                                  sv_info.constellation = GnssConstellationType::UNKNOWN;
+                                  break;
+                          }
+                          sv_info.cN0Dbhz = sat.ss > 0 ? sat.ss : 0;
+                          sv_info.elevationDegrees = 0;
+                          sv_info.azimuthDegrees = 0;
+                          sv_info.carrierFrequencyHz = 0;
+                          sv_info.svFlag = 0;
+
+                          if (!std::isnan(sat.elevation) && !std::isnan(sat.azimuth)) {
+                              sv_info.elevationDegrees = sat.elevation;
+                              sv_info.azimuthDegrees = sat.azimuth;
+                              sv_info.svFlag |= GnssSvFlags::HAS_EPHEMERIS_DATA
+                                                | GnssSvFlags::HAS_ALMANAC_DATA;
+                          }
+
+                          if (mGnssConfiguration->isBlacklisted(sv_info)) {
+                              ALOGI("SV 0x%02x is blacklisted", sat.svid);
+                          } else if (sat.used) {
+                            sv_info.svFlag |= GnssSvFlags::USED_IN_FIX;
+                          }
+                          ALOGD("SvInfo[%d] svid=0x%02x, constellation=%hhd, used=%s, "
+                                "elevation=%f, azimuth=%f, SNR=%f, carrier freq=%f",
+                                i, sv_info.svid, sv_info.constellation,
+                                sv_info.svFlag & GnssSvFlags::USED_IN_FIX ? "yes" : "no",
+                                sv_info.elevationDegrees, sv_info.azimuthDegrees,
+                                sv_info.cN0Dbhz, sv_info.carrierFrequencyHz);
+                      }
+                      this->reportSvStatus(svStatus);
+                      gps_data.set &= ~SATELLITE_SET;
+                  }
+              }
+            } else {
+              ALOGD("...gps_waiting timed out: %s", strerror(errno));
+              if (gps_data.set & ERROR_SET) {
+                ALOGE("gps_data error: %s", gps_data.error);
+              }
+              // TODO: check whether socket is still open
             }
         }
 
         // Close the GPS if it was successfully opened.
         if (gpsopen == 0) {
             gps_stream(&gps_data, WATCH_DISABLE, NULL);
-            gps_close (&gps_data);
+            gps_close(&gps_data);
         }
+        ALOGE("GPS THREAD STOPPED %s", oss.str().c_str());
     });
+    std::ostringstream oss;
+    oss << mThread.get_id();
+    ALOGE("started thread %s", oss.str().c_str());
 
     return true;
 }
 
 Return<bool> Gnss::stop() {
+    ALOGD("Gnss::stop");
     mIsActive = false;
-    if (mThread.joinable()) {
+    if (mThread.joinable()) { 
+
+        std::ostringstream oss;
+        oss << mThread.get_id();
+        ALOGE("joining thread %s", oss.str().c_str());
         mThread.join();
     }
+
+    std::unique_lock<std::mutex> lock(mMutex);
+    sGnssCallback = nullptr;
     return true;
 }
 
 Return<void> Gnss::cleanup() {
-    // TODO implement
+    ALOGD("cleanup");
+
+    std::unique_lock<std::mutex> lock(mMutex);
+    sGnssCallback = nullptr;
+
     return Void();
 }
 
-Return<bool> Gnss::injectTime(int64_t, int64_t, int32_t) {
+Return<bool> Gnss::injectTime(int64_t timeMs, int64_t timeReferenceMs, int32_t uncertaintyMs) {
+    ALOGD("inject time %ldms, reference: %ldms, uncertainty: %dms",
+          timeMs, timeReferenceMs, uncertaintyMs);
     // TODO implement
     return bool{};
 }
 
 Return<bool> Gnss::injectLocation(double, double, float) {
+    ALOGD("inject location");
     // TODO implement
     return bool{};
 }
 
 Return<void> Gnss::deleteAidingData(::android::hardware::gnss::V1_0::IGnss::GnssAidingData) {
+    ALOGD("delete aiding data");
     return Void();
 }
 
-Return<bool> Gnss::setPositionMode(::android::hardware::gnss::V1_0::IGnss::GnssPositionMode,
-                                   ::android::hardware::gnss::V1_0::IGnss::GnssPositionRecurrence,
-                                   uint32_t, uint32_t, uint32_t) {
-    // TODO implement
-    return bool{};
+Return<bool> Gnss::setPositionMode(GnssPositionMode mode, GnssPositionRecurrence recurrence,
+                                   uint32_t minIntervalMs, uint32_t preferredAccuracyMeters,
+                                   uint32_t preferredTimeMs) {
+    ALOGD("Gnss::setPositionMode mode=%s, recurrence=%s, min_interval=%dms, pref_accuracy=%dm, "
+          "pref_time=%dms",
+          mode == GnssPositionMode::MS_BASED ? "MS_BASED"
+          : mode == GnssPositionMode::MS_ASSISTED ? "MS_ASSISTED" : "STANDALONE", 
+          recurrence == GnssPositionRecurrence::RECURRENCE_SINGLE ? "SINGLE" : "PERIODIC",
+          minIntervalMs, preferredAccuracyMeters, preferredTimeMs);
+
+    return false;
 }
 
 Return<sp<::android::hardware::gnss::V1_0::IAGnssRil>> Gnss::getExtensionAGnssRil() {
+    ALOGD("get extension a gnss ril");
     // TODO implement
     return ::android::sp<::android::hardware::gnss::V1_0::IAGnssRil>{};
 }
 
 Return<sp<::android::hardware::gnss::V1_0::IGnssGeofencing>> Gnss::getExtensionGnssGeofencing() {
+    ALOGD("get extension gnss geofencing");
     // TODO implement
     return ::android::sp<::android::hardware::gnss::V1_0::IGnssGeofencing>{};
 }
 
 Return<sp<::android::hardware::gnss::V1_0::IAGnss>> Gnss::getExtensionAGnss() {
+    ALOGD("get extension a gnss");
     // TODO implement
     return ::android::sp<::android::hardware::gnss::V1_0::IAGnss>{};
 }
 
 Return<sp<::android::hardware::gnss::V1_0::IGnssNi>> Gnss::getExtensionGnssNi() {
+    ALOGD("get extension gnss ni");
     // TODO implement
     return ::android::sp<::android::hardware::gnss::V1_0::IGnssNi>{};
 }
 
 Return<sp<::android::hardware::gnss::V1_0::IGnssMeasurement>> Gnss::getExtensionGnssMeasurement() {
-    // TODO implement
-    return new GnssMeasurement();
+    ALOGD("get extension gnss measurement");
+    return mGnssMeasurement;
 }
 
 Return<sp<::android::hardware::gnss::V1_0::IGnssNavigationMessage>>
 Gnss::getExtensionGnssNavigationMessage() {
+    ALOGD("get extension gnss navigation message");
     // TODO implement
     return ::android::sp<::android::hardware::gnss::V1_0::IGnssNavigationMessage>{};
 }
 
 Return<sp<::android::hardware::gnss::V1_0::IGnssXtra>> Gnss::getExtensionXtra() {
+    ALOGD("get extension xtra");
     // TODO implement
     return ::android::sp<::android::hardware::gnss::V1_0::IGnssXtra>{};
 }
 
 Return<sp<::android::hardware::gnss::V1_0::IGnssConfiguration>>
 Gnss::getExtensionGnssConfiguration() {
-    // TODO implement
-    return new GnssConfiguration();
+    ALOGD("get gnss configuration");
+    return mGnssConfiguration;
 }
 
 Return<sp<::android::hardware::gnss::V1_0::IGnssDebug>> Gnss::getExtensionGnssDebug() {
+    ALOGD("get extension gnss debug");
     // TODO implement
     return ::android::sp<::android::hardware::gnss::V1_0::IGnssDebug>{};
 }
 
 Return<sp<::android::hardware::gnss::V1_0::IGnssBatching>> Gnss::getExtensionGnssBatching() {
+    ALOGD("get extension gnss batching");
     // TODO implement
     return ::android::sp<::android::hardware::gnss::V1_0::IGnssBatching>{};
 }
@@ -316,17 +457,20 @@ Return<sp<::android::hardware::gnss::V1_0::IGnssBatching>> Gnss::getExtensionGns
 // Methods from ::android::hardware::gnss::V1_1::IGnss follow.
 Return<bool> Gnss::setCallback_1_1(
     const sp<::android::hardware::gnss::V1_1::IGnssCallback>& callback) {
+    ALOGD("set callback");
     if (callback == nullptr) {
         ALOGE("%s: Null callback ignored", __func__);
         return false;
     }
 
+    std::unique_lock<std::mutex> lock(mMutex);
     sGnssCallback = callback;
 
     uint32_t capabilities = 0x0;
     auto ret = sGnssCallback->gnssSetCapabilitesCb(capabilities);
     if (!ret.isOk()) {
         ALOGE("%s: Unable to invoke callback", __func__);
+        return false;
     }
 
     IGnssCallback::GnssSystemInfo gnssInfo = {.yearOfHw = 2018};
@@ -334,74 +478,87 @@ Return<bool> Gnss::setCallback_1_1(
     ret = sGnssCallback->gnssSetSystemInfoCb(gnssInfo);
     if (!ret.isOk()) {
         ALOGE("%s: Unable to invoke callback", __func__);
+        return false;
     }
 
     auto gnssName = "GPSd GNSS Implementation v1.1";
     ret = sGnssCallback->gnssNameCb(gnssName);
     if (!ret.isOk()) {
         ALOGE("%s: Unable to invoke callback", __func__);
+        return false;
     }
 
     return true;
 }
 
-Return<bool> Gnss::setPositionMode_1_1(
-    ::android::hardware::gnss::V1_0::IGnss::GnssPositionMode,
-    ::android::hardware::gnss::V1_0::IGnss::GnssPositionRecurrence, uint32_t minIntervalMs,
-    uint32_t, uint32_t, bool) {
-    mMinIntervalMs = (minIntervalMs < MIN_INTERVAL_MILLIS) ? MIN_INTERVAL_MILLIS : minIntervalMs;
+Return<bool> Gnss::setPositionMode_1_1(GnssPositionMode mode, GnssPositionRecurrence recurrence,
+    uint32_t minIntervalMs, uint32_t preferredAccuracyMeters, uint32_t preferredTimeMs,
+    bool low_power_mode) {
+    ALOGD("Gnss::setPositionMode_1_1 mode=%s, recurrence=%s, min_interval=%dms, pref_accuracy=%dm, "
+          "pref_time=%dms low_power_mode=%s",
+          mode == GnssPositionMode::MS_BASED ? "MS_BASED"
+          : mode == GnssPositionMode::MS_ASSISTED ? "MS_ASSISTED" : "STANDALONE", 
+          recurrence == GnssPositionRecurrence::RECURRENCE_SINGLE ? "SINGLE" : "PERIODIC",
+          minIntervalMs, preferredAccuracyMeters, preferredTimeMs, low_power_mode ? "on" : "off");
+
+    std::unique_lock<std::mutex> lock(mMutex);
+    mMinIntervalMs = minIntervalMs;
     return true;
 }
 
 Return<sp<::android::hardware::gnss::V1_1::IGnssConfiguration>>
 Gnss::getExtensionGnssConfiguration_1_1() {
+    ALOGD("get extension gnss configuration 1.1");
     return mGnssConfiguration;
 }
 
 Return<sp<::android::hardware::gnss::V1_1::IGnssMeasurement>>
 Gnss::getExtensionGnssMeasurement_1_1() {
-    // TODO implement
-    return new GnssMeasurement();
+    ALOGD("get extension gnss measurement 1.1");
+    return mGnssMeasurement;
 }
 
 Return<bool> Gnss::injectBestLocation(const GnssLocation&) {
+    ALOGD("inject best location");
     return true;
 }
 
-Return<GnssSvInfo> Gnss::getSvInfo(int16_t svid, GnssConstellationType type, float cN0DbHz,
-                                   float elevationDegrees, float azimuthDegrees, int16_t used) const {
-    GnssSvInfo svInfo = {.svid = svid,
-                         .constellation = type,
-                         .cN0Dbhz = cN0DbHz,
-                         .elevationDegrees = elevationDegrees,
-                         .azimuthDegrees = azimuthDegrees,
-                         .svFlag = 0};
-    if (used)
-        svInfo.svFlag |= GnssSvFlags::USED_IN_FIX;
-    if (elevationDegrees > 0 && azimuthDegrees > 0)
-        svInfo.svFlag |= GnssSvFlags::HAS_EPHEMERIS_DATA | GnssSvFlags::HAS_ALMANAC_DATA;
+void Gnss::reportLocation(const GnssLocation& location) const {
+    if (!mIsActive) {
+        ALOGI("will not report location, GPS inactive");
+        return;
+    }
 
-    return svInfo;
-}
-
-Return<void> Gnss::reportLocation(const GnssLocation& location) const {
     std::unique_lock<std::mutex> lock(mMutex);
     if (sGnssCallback == nullptr) {
-        ALOGE("%s: sGnssCallback is null.", __func__);
-        return Void();
+        ALOGE("will not report location, sGnssCallback is null");
+        return;
     }
-    sGnssCallback->gnssLocationCb(location);
-    return Void();
+
+    ALOGD("calling gnssLocationCb() callback to report location");
+    auto status = sGnssCallback->gnssLocationCb(location);
+    if (!status.isOk()) {
+        ALOGE("reporting location failed");
+    }
 }
 
-Return<void> Gnss::reportSvStatus(const GnssSvStatus& svStatus) const {
+void Gnss::reportSvStatus(const GnssSvStatus& svStatus) const {
+    if (!mIsActive) {
+        ALOGI("will not report SV status, GPS inactive");
+        return;
+    }
+
     std::unique_lock<std::mutex> lock(mMutex);
     if (sGnssCallback == nullptr) {
-        ALOGE("%s: sGnssCallback is null.", __func__);
-        return Void();
+        ALOGI("will not report SV status, sGnssCallback is null");
+        return;
     }
-    sGnssCallback->gnssSvStatusCb(svStatus);
-    return Void();
+
+    ALOGD("calling gnssSvStatusCb() callback to report SV status");
+    auto status = sGnssCallback->gnssSvStatusCb(svStatus);
+    if (!status.isOk()) {
+        ALOGE("reporting SV status failed");
+    }
 }
 
 }  // namespace implementation

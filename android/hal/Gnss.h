@@ -8,6 +8,7 @@
 #include <mutex>
 #include <thread>
 #include "GnssConfiguration.h"
+#include "GnssMeasurement.h"
 #include "include/gps.h"
 
 namespace android {
@@ -85,14 +86,13 @@ struct Gnss : public IGnss {
 
     // Methods from ::android::hidl::base::V1_0::IBase follow.
    private:
-    Return<GnssSvInfo> getSvInfo(int16_t svid, GnssConstellationType type, float cN0DbHz,
-                                 float elevationDegress, float azimuthDegress, int16_t used) const;
-    Return<void> reportLocation(const GnssLocation&) const;
-    Return<void> reportSvStatus(const GnssSvStatus&) const;
+    void reportLocation(const GnssLocation&) const;
+    void reportSvStatus(const GnssSvStatus&) const;
 
     static sp<IGnssCallback> sGnssCallback;
     std::atomic<long> mMinIntervalMs;
     sp<GnssConfiguration> mGnssConfiguration;
+    sp<GnssMeasurement> mGnssMeasurement;
     std::atomic<bool> mIsActive;
     std::thread mThread;
     mutable std::mutex mMutex;
