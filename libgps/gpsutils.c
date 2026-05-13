@@ -918,12 +918,12 @@ timespec_t iso8601_to_timespec(const char *isotime)
     ret.tv_nsec = usec * 1e9;
 #endif  // USE_QT
 
-#if 4 < SIZEOF_TIME_T
-    if (253402300799LL < ret.tv_sec) {
-        // enforce max "9999-12-31T23:59:59.999Z"
-        ret.tv_sec = 253402300799LL;
-    }
-#endif
+//#if 4 < SIZEOF_TIME_T
+//    if (253402300799LL < ret.tv_sec) {
+//        // enforce max "9999-12-31T23:59:59.999Z"
+//        ret.tv_sec = 253402300799LL;
+//    }
+//#endif
     return ret;
 }
 
@@ -948,12 +948,12 @@ char *timespec_to_iso8601(timespec_t fixtime, char isotime[], size_t len)
         fixtime.tv_nsec = 0;
     }
 
-#if 4 < SIZEOF_TIME_T
-    if (253402300799LL < fixtime.tv_sec) {
-        // enforce max "9999-12-31T23:59:59.999Z"
-        fixtime.tv_sec = 253402300799LL;
-    }
-#endif
+//#if 4 < SIZEOF_TIME_T
+//    if (253402300799LL < fixtime.tv_sec) {
+//        // enforce max "9999-12-31T23:59:59.999Z"
+//        fixtime.tv_sec = 253402300799LL;
+//    }
+//#endif
 
     (void)gmtime_r(&fixtime.tv_sec, &when);
 
