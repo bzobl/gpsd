@@ -349,13 +349,17 @@ Return<bool> Gnss::stop() {
         mThread.join();
     }
 
-    std::unique_lock<std::mutex> lock(mMutex);
-    sGnssCallback = nullptr;
     return true;
 }
 
 Return<void> Gnss::cleanup() {
     ALOGD("cleanup");
+    if (mIsActive) {
+      auto status = this->stop();
+      if (!status.isOk()) {
+        ALOGE("stopping thread failed");
+      }
+    }
 
     std::unique_lock<std::mutex> lock(mMutex);
     sGnssCallback = nullptr;
