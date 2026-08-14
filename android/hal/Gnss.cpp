@@ -42,7 +42,7 @@ Return<bool> Gnss::setCallback(const sp<::android::hardware::gnss::V1_0::IGnssCa
 }
 
 Return<bool> Gnss::start() {
-    ALOGD("Gnss::start");
+    ALOGD("Gnss::start()");
 
     if (mIsActive) {
         ALOGW("Gnss has started. Restarting...");
@@ -339,10 +339,9 @@ Return<bool> Gnss::start() {
 }
 
 Return<bool> Gnss::stop() {
-    ALOGD("Gnss::stop");
+    ALOGD("Gnss::stop()");
     mIsActive = false;
     if (mThread.joinable()) { 
-
         std::ostringstream oss;
         oss << mThread.get_id();
         ALOGE("joining thread %s", oss.str().c_str());
@@ -353,7 +352,8 @@ Return<bool> Gnss::stop() {
 }
 
 Return<void> Gnss::cleanup() {
-    ALOGD("cleanup");
+    ALOGD("Gnss::cleanup()");
+
     if (mIsActive) {
       auto status = this->stop();
       if (!status.isOk()) {
@@ -368,28 +368,28 @@ Return<void> Gnss::cleanup() {
 }
 
 Return<bool> Gnss::injectTime(int64_t timeMs, int64_t timeReferenceMs, int32_t uncertaintyMs) {
-    ALOGD("inject time %ldms, reference: %ldms, uncertainty: %dms",
+    ALOGD("not yet implemented: Gnss::injectTime(time: %ldms, reference: %ldms, uncertainty: %dms)",
           timeMs, timeReferenceMs, uncertaintyMs);
-    // TODO implement
-    return bool{};
+    return false;
 }
 
-Return<bool> Gnss::injectLocation(double, double, float) {
-    ALOGD("inject location");
-    // TODO implement
-    return bool{};
+Return<bool> Gnss::injectLocation(double latitudeDegrees, double longitudeDegrees,
+                                  float accuracyMeters) {
+    ALOGD("not implemented: Gnss::injectLocation(lat: %f, lon: %f, accuracy: %f)",
+          latitudeDegrees, longitudeDegrees, accuracyMeters);
+    return false;
 }
 
 Return<void> Gnss::deleteAidingData(::android::hardware::gnss::V1_0::IGnss::GnssAidingData) {
-    ALOGD("delete aiding data");
+    ALOGD("not implemented: Gnss::deleteAidingData()");
     return Void();
 }
 
 Return<bool> Gnss::setPositionMode(GnssPositionMode mode, GnssPositionRecurrence recurrence,
                                    uint32_t minIntervalMs, uint32_t preferredAccuracyMeters,
                                    uint32_t preferredTimeMs) {
-    ALOGD("Gnss::setPositionMode mode=%s, recurrence=%s, min_interval=%dms, pref_accuracy=%dm, "
-          "pref_time=%dms",
+    ALOGD("Gnss::setPositionMode(mode: %s, recurrence: %s, minInterval: %dms, prefAccuracy=%dm, "
+          "prefTime=%dms",
           mode == GnssPositionMode::MS_BASED ? "MS_BASED"
           : mode == GnssPositionMode::MS_ASSISTED ? "MS_ASSISTED" : "STANDALONE", 
           recurrence == GnssPositionRecurrence::RECURRENCE_SINGLE ? "SINGLE" : "PERIODIC",
@@ -399,71 +399,63 @@ Return<bool> Gnss::setPositionMode(GnssPositionMode mode, GnssPositionRecurrence
 }
 
 Return<sp<::android::hardware::gnss::V1_0::IAGnssRil>> Gnss::getExtensionAGnssRil() {
-    ALOGD("get extension a gnss ril");
-    // TODO implement
+    ALOGD("not implemented: Gnss::getExtensionAGnssRil()");
     return ::android::sp<::android::hardware::gnss::V1_0::IAGnssRil>{};
 }
 
 Return<sp<::android::hardware::gnss::V1_0::IGnssGeofencing>> Gnss::getExtensionGnssGeofencing() {
-    ALOGD("get extension gnss geofencing");
-    // TODO implement
+    ALOGD("not implemented: Gnss::getExtensionGnssGeofencing()");
     return ::android::sp<::android::hardware::gnss::V1_0::IGnssGeofencing>{};
 }
 
 Return<sp<::android::hardware::gnss::V1_0::IAGnss>> Gnss::getExtensionAGnss() {
-    ALOGD("get extension a gnss");
-    // TODO implement
+    ALOGD("not implemented: Gnss::getExtensionAGnss()");
     return ::android::sp<::android::hardware::gnss::V1_0::IAGnss>{};
 }
 
 Return<sp<::android::hardware::gnss::V1_0::IGnssNi>> Gnss::getExtensionGnssNi() {
-    ALOGD("get extension gnss ni");
-    // TODO implement
+    ALOGD("not implemented: Gnss::getExtensionGnssNi()");
     return ::android::sp<::android::hardware::gnss::V1_0::IGnssNi>{};
 }
 
 Return<sp<::android::hardware::gnss::V1_0::IGnssMeasurement>> Gnss::getExtensionGnssMeasurement() {
-    ALOGD("get extension gnss measurement");
+    ALOGD("not implemented: Gnss::getExtensionGnssMeasurement()");
     return mGnssMeasurement;
 }
 
 Return<sp<::android::hardware::gnss::V1_0::IGnssNavigationMessage>>
 Gnss::getExtensionGnssNavigationMessage() {
-    ALOGD("get extension gnss navigation message");
-    // TODO implement
+    ALOGD("not implemented: Gnss::getExtensionGnssNavigationMessage()");
     return ::android::sp<::android::hardware::gnss::V1_0::IGnssNavigationMessage>{};
 }
 
 Return<sp<::android::hardware::gnss::V1_0::IGnssXtra>> Gnss::getExtensionXtra() {
-    ALOGD("get extension xtra");
-    // TODO implement
+    ALOGD("not implemented: Gnss::getExtensionXtra()");
     return ::android::sp<::android::hardware::gnss::V1_0::IGnssXtra>{};
 }
 
 Return<sp<::android::hardware::gnss::V1_0::IGnssConfiguration>>
 Gnss::getExtensionGnssConfiguration() {
-    ALOGD("get gnss configuration");
+    ALOGD("Gnss::getExtensionGnssConfiguration()");
     return mGnssConfiguration;
 }
 
 Return<sp<::android::hardware::gnss::V1_0::IGnssDebug>> Gnss::getExtensionGnssDebug() {
-    ALOGD("get extension gnss debug");
-    // TODO implement
+    ALOGD("not implemented: Gnss::getExtensionGnssDebug()");
     return ::android::sp<::android::hardware::gnss::V1_0::IGnssDebug>{};
 }
 
 Return<sp<::android::hardware::gnss::V1_0::IGnssBatching>> Gnss::getExtensionGnssBatching() {
-    ALOGD("get extension gnss batching");
-    // TODO implement
+    ALOGD("not implemented: Gnss::getExtensionGnssBatching()");
     return ::android::sp<::android::hardware::gnss::V1_0::IGnssBatching>{};
 }
 
 // Methods from ::android::hardware::gnss::V1_1::IGnss follow.
 Return<bool> Gnss::setCallback_1_1(
     const sp<::android::hardware::gnss::V1_1::IGnssCallback>& callback) {
-    ALOGD("set callback");
+    ALOGD("Gnss::setCallback_1_1()");
     if (callback == nullptr) {
-        ALOGE("%s: Null callback ignored", __func__);
+        ALOGE("%s: null callback ignored", __func__);
         return false;
     }
 
@@ -473,7 +465,7 @@ Return<bool> Gnss::setCallback_1_1(
     uint32_t capabilities = 0x0;
     auto ret = sGnssCallback->gnssSetCapabilitesCb(capabilities);
     if (!ret.isOk()) {
-        ALOGE("%s: Unable to invoke callback", __func__);
+        ALOGE("%s: unable to invoke callback", __func__);
         return false;
     }
 
@@ -481,14 +473,14 @@ Return<bool> Gnss::setCallback_1_1(
 
     ret = sGnssCallback->gnssSetSystemInfoCb(gnssInfo);
     if (!ret.isOk()) {
-        ALOGE("%s: Unable to invoke callback", __func__);
+        ALOGE("%s: unable to invoke callback", __func__);
         return false;
     }
 
     auto gnssName = "GPSd GNSS Implementation v1.1";
     ret = sGnssCallback->gnssNameCb(gnssName);
     if (!ret.isOk()) {
-        ALOGE("%s: Unable to invoke callback", __func__);
+        ALOGE("%s: unable to invoke callback", __func__);
         return false;
     }
 
@@ -498,8 +490,8 @@ Return<bool> Gnss::setCallback_1_1(
 Return<bool> Gnss::setPositionMode_1_1(GnssPositionMode mode, GnssPositionRecurrence recurrence,
     uint32_t minIntervalMs, uint32_t preferredAccuracyMeters, uint32_t preferredTimeMs,
     bool low_power_mode) {
-    ALOGD("Gnss::setPositionMode_1_1 mode=%s, recurrence=%s, min_interval=%dms, pref_accuracy=%dm, "
-          "pref_time=%dms low_power_mode=%s",
+    ALOGD("Gnss::setPositionMode_1_1(mode: %s, recurrence: %s, minInterval: %dms, "
+          "prefAccuracy: %dm, prefTime: %dms, low_power_mode: %s",
           mode == GnssPositionMode::MS_BASED ? "MS_BASED"
           : mode == GnssPositionMode::MS_ASSISTED ? "MS_ASSISTED" : "STANDALONE", 
           recurrence == GnssPositionRecurrence::RECURRENCE_SINGLE ? "SINGLE" : "PERIODIC",
@@ -512,18 +504,18 @@ Return<bool> Gnss::setPositionMode_1_1(GnssPositionMode mode, GnssPositionRecurr
 
 Return<sp<::android::hardware::gnss::V1_1::IGnssConfiguration>>
 Gnss::getExtensionGnssConfiguration_1_1() {
-    ALOGD("get extension gnss configuration 1.1");
+    ALOGD("Gnss::getExtensionGnssConfiguration_1_1()");
     return mGnssConfiguration;
 }
 
 Return<sp<::android::hardware::gnss::V1_1::IGnssMeasurement>>
 Gnss::getExtensionGnssMeasurement_1_1() {
-    ALOGD("get extension gnss measurement 1.1");
+    ALOGD("Gnss::getExtensionGnssMeasurement_1_1()");
     return mGnssMeasurement;
 }
 
 Return<bool> Gnss::injectBestLocation(const GnssLocation&) {
-    ALOGD("inject best location");
+    ALOGD("Gnss::injectBestLocation()");
     return true;
 }
 
@@ -539,7 +531,7 @@ void Gnss::reportLocation(const GnssLocation& location) const {
         return;
     }
 
-    ALOGD("calling gnssLocationCb() callback to report location");
+    ALOGV("calling gnssLocationCb() callback to report location");
     auto status = sGnssCallback->gnssLocationCb(location);
     if (!status.isOk()) {
         ALOGE("reporting location failed");
@@ -558,7 +550,7 @@ void Gnss::reportSvStatus(const GnssSvStatus& svStatus) const {
         return;
     }
 
-    ALOGD("calling gnssSvStatusCb() callback to report SV status");
+    ALOGV("calling gnssSvStatusCb() callback to report SV status");
     auto status = sGnssCallback->gnssSvStatusCb(svStatus);
     if (!status.isOk()) {
         ALOGE("reporting SV status failed");
