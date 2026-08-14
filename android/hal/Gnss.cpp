@@ -23,7 +23,7 @@ using GnssSvFlags = IGnssCallback::GnssSvFlags;
 sp<::android::hardware::gnss::V1_1::IGnssCallback> Gnss::sGnssCallback = nullptr;
 
 Gnss::Gnss() :
-    mMinIntervalMs(1000),
+    mMinIntervalMs(500),
     mGnssConfiguration{new GnssConfiguration()},
     mGnssMeasurement{new GnssMeasurement()},
     mIsActive(false) {}
