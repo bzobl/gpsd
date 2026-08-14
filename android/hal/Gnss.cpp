@@ -67,7 +67,6 @@ Return<bool> Gnss::start() {
         time_t last_recorded_fix = 0;
         char dtos[100];
         GnssLocation location = {};
-        bool have_automotive_location = false;
         time_t last_report_ms = 0;
 
         // Normally, GPSd will be running on localhost, but we can set a system property
@@ -80,257 +79,261 @@ Return<bool> Gnss::start() {
         // Load coordinates stored in persist properties as current location
         // This is to provide instantaneous fix to the last good location
         // in order to provide instantaneous ability to begin navigator routing.
-      if (is_automotive && property_get("persist.service.gpsd.latitude", gpslat, "") > 0
-                        && property_get("persist.service.gpsd.longitude", gpslon, "") > 0){
-            location = {
-                     .gnssLocationFlags = 0xDD,
-                     .latitudeDegrees = atof(gpslat),
-                     .longitudeDegrees = atof(gpslon),
-                     .speedMetersPerSec = 0.0,
-                     .bearingDegrees = 0.0,
-                     .horizontalAccuracyMeters = 0.0,
-                     .speedAccuracyMetersPerSecond = 0.0,
-                     .bearingAccuracyDegrees = 0.0,
-                     .timestamp = (int64_t)time(NULL) * 1000
-            };
-            have_automotive_location = true;
-            this->reportLocation(location);
-        }
+        if (is_automotive && property_get("persist.service.gpsd.latitude", gpslat, "") > 0
+                          && property_get("persist.service.gpsd.longitude", gpslon, "") > 0){
+              location.gnssLocationFlags = 0;
+              location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_LAT_LONG;
+              location.latitudeDegrees = atof(gpslat);
+              location.longitudeDegrees = atof(gpslon);
+              location.altitudeMeters = 0.0;
+              location.speedMetersPerSec = 0.0;
+              location.bearingDegrees = 0.0;
+              location.horizontalAccuracyMeters = 0.0;
+              location.verticalAccuracyMeters = 0.0;
+              location.speedAccuracyMetersPerSecond = 0.0;
+              location.bearingAccuracyDegrees = 0.0;
+              location.timestamp = (int64_t)time(NULL) * 1000;
+              this->reportLocation(location);
+          }
 
-        memset(&gps_data, 0, sizeof(gps_data));
+          memset(&gps_data, 0, sizeof(gps_data));
 
-        while (mIsActive == true) {
-            // If the connection to GPSd is not open, try to open it.
-            // If the attempt to open it fails, sleep 5 seconds and try again.
-            // Note the continue; statement that will skip the reading in the
-            // event that the connection to GPSd cannot be established.
-            if (gpsopen != 0){
-                ALOGD("%s: gpsd_host: %s, gpsd_port: %s", __func__, gpsdhost, gpsdport);
-                if ((gpsopen = gps_open(gpsdhost, gpsdport, &gps_data)) == 0){
-                    ALOGD("%s: gps_open SUCCESS", __func__);
-                    if (gps_stream(&gps_data, WATCH_ENABLE, NULL) != 0) {
-                      ALOGW("gps_stream failed: %s", strerror(errno));
-                    }
-                } else {
-                    ALOGW("%s: gps_open FAIL (%d). Trying again in 5 seconds.", __func__, gpsopen);
-                    sleep(5);
+          while (mIsActive == true) {
+              // If the connection to GPSd is not open, try to open it.
+              // If the attempt to open it fails, sleep 5 seconds and try again.
+              if (gpsopen != 0){
+                  ALOGD("%s: gpsd_host: %s, gpsd_port: %s", __func__, gpsdhost, gpsdport);
+                  gpsopen = gps_open(gpsdhost, gpsdport, &gps_data);
+                  if (gpsopen != 0) {
+                      ALOGW("%s: gps_open FAIL (%d). Trying again in 5 seconds.", __func__, gpsopen);
+                      sleep(5);
+                      continue;
+                  }
+
+                  ALOGV("%s: gps_open SUCCESS", __func__);
+                  if (gps_stream(&gps_data, WATCH_ENABLE, NULL) != 0) {
+                    ALOGW("gps_stream failed: %s", strerror(errno));
+                    gps_close(&gps_data);
+                    gpsopen = -1;
                     continue;
-                }
-            }
-
-
-            // Wait for data from gpsd, then process it.
-            ALOGD("waiting for data...");
-            if (gps_waiting (&gps_data, 2000000)) {
-                errno = 0;
-                if (gps_read (&gps_data, NULL, 0) != -1) {
-                    ALOGD("set=0x%012lx, set_pending=0x%012lx. "
-                            "Fix: status=%d, mode=%d, time=%ld, lat=%e, lon=%e, alt=%e, speed=%e, track=%e "
-                          "Accuracy: h=%e, v=%e, speed=%e, track=%e "
-                          "using %d/%d satellites. device used %.128s",
-                          gps_data.set, gps_data.set_pending,
-                          gps_data.fix.status, gps_data.fix.mode, gps_data.fix.time.tv_sec,
-                          gps_data.fix.latitude, gps_data.fix.longitude, gps_data.fix.altHAE,
-                          gps_data.fix.speed, gps_data.fix.track,
-                          gps_data.fix.eph, gps_data.fix.epv, gps_data.fix.eps, gps_data.fix.epd,
-                          gps_data.satellites_used, gps_data.satellites_visible,
-                          gps_data.dev.path);
-
-                    if (gps_data.fix.mode >= 2) {
-
-                        location.gnssLocationFlags = 0;
-                        location.timestamp = 0;
-
-                        if (gps_data.set & TIME_SET) {
-                          location.timestamp = (int64_t)gps_data.fix.time.tv_sec * 1000 +
-                                               gps_data.fix.time.tv_nsec / 1000000;
-                        }
-
-                        if ((gps_data.set & LATLON_SET) && (gps_data.set & HERR_SET)) {
-                          location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_LAT_LONG;
-                          location.latitudeDegrees = gps_data.fix.latitude;
-                          location.longitudeDegrees = gps_data.fix.longitude;
-
-                          location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_HORIZONTAL_ACCURACY;
-                          location.horizontalAccuracyMeters = gps_data.fix.eph;
-
-                          // Every 30 seconds, store current coordinates to persist property.
-                          if (is_automotive &&
-                              gps_data.fix.time.tv_sec > last_recorded_fix + 30){
-                              last_recorded_fix = gps_data.fix.time.tv_sec;
-                              snprintf(dtos, sizeof(dtos), "%lf", gps_data.fix.latitude);
-                              property_set("persist.service.gpsd.latitude", dtos);
-                              snprintf(dtos, sizeof(dtos), "%lf", gps_data.fix.longitude);
-                              property_set("persist.service.gpsd.longitude", dtos);
-                          }
-                        }
-
-
-                        if ((gps_data.set & SPEED_SET) && (gps_data.set & SPEEDERR_SET)) {
-                          location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_SPEED;
-                          location.speedMetersPerSec = gps_data.fix.speed;
-
-                          location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_SPEED_ACCURACY;
-                          location.speedAccuracyMetersPerSecond = gps_data.fix.eps;
-                        }
-
-                        if ((gps_data.set & TRACK_SET) && (gps_data.set & TRACKERR_SET)) {
-                          location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_BEARING;
-                          location.bearingDegrees = gps_data.fix.track;
-
-                          location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_BEARING_ACCURACY;
-                          location.bearingAccuracyDegrees = gps_data.fix.epd;
-                        }
-
-                        if ((gps_data.set & ALTITUDE_SET) && (gps_data.set & VERR_SET)) {
-                          location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_ALTITUDE;
-                          location.altitudeMeters = gps_data.fix.altHAE;
-
-                          location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_VERTICAL_ACCURACY;
-                          location.verticalAccuracyMeters = gps_data.fix.epv;
-                        }
-
-                        if ((location.timestamp == 0)
-                            ||!(location.gnssLocationFlags & V1_0::GnssLocationFlags::HAS_LAT_LONG)
-                            //|| !(location.gnssLocationFlags & V1_0::GnssLocationFlags::HAS_SPEED)
-                            //|| !(location.gnssLocationFlags & V1_0::GnssLocationFlags::HAS_BEARING)
-                            || !(location.gnssLocationFlags & V1_0::GnssLocationFlags::HAS_ALTITUDE)
-                            //|| !(gps_data.set & SATELLITE_SET)
-                            //|| (gps_data.satellites_used == 0)
-                            ) {
-                          ALOGD("don't have all data, skipping");
-                          continue;
-                        }
-
-                        if ((last_report_ms + mMinIntervalMs) > location.timestamp) {
-                          ALOGD("report too early now: %ld, next report due: %ld",
-                                location.timestamp, last_report_ms + mMinIntervalMs);
-                          continue;
-                        }
-                        last_report_ms = location.timestamp;
-
-                        gps_data.set &= ~(LATLON_SET | HERR_SET | SPEED_SET | SPEEDERR_SET
-                                          | TRACK_SET | TRACKERR_SET | ALTITUDE_SET | VERR_SET
-                                          | TIME_SET);
-                        gps_clear_fix(&gps_data.fix);
-                        have_automotive_location = true;
-                        this->reportLocation(location);
-//                   } else if (is_automotive && have_automotive_location && last_recorded_fix == 0){
-//                       location.timestamp = (int64_t)time(NULL) * 1000;
-//                       this->reportLocation(location);
-                    }
-
-                    if ((gps_data.set & SATELLITE_SET) && (gps_data.satellites_visible > 0)) {
-                        GnssSvStatus svStatus = { };
-                        memset(&svStatus, 0, sizeof(svStatus));
-
-                        svStatus.numSvs = gps_data.satellites_visible;
-                        if (svStatus.numSvs > svStatus.gnssSvList.size()) {
-                            svStatus.numSvs = svStatus.gnssSvList.size();
-                        }
-
-                      for (uint32_t i = 0; i < svStatus.numSvs; i++){
-                          GnssSvInfo &sv_info = svStatus.gnssSvList[i];
-                          const satellite_t &sat = gps_data.skyview[i];
-
-                          ALOGD("Satelite[%d] svid=0x%02x, constellation=%d, used=%s, "
-                                "elevation=%f, azimuth=%f, SNR=%f, carrier freq=%d",
-                                i, sat.svid, sat.gnssid, sat.used ? "yes" : "no",
-                                sat.elevation, sat.azimuth, sat.ss, sat.freqid);
-
-                          sv_info.svid = sat.svid;
-                          switch (sat.gnssid) {
-                              case GNSSID_GPS:
-                                  sv_info.constellation = GnssConstellationType::GPS;
-                                  if ((sv_info.svid < 1) || (sv_info.svid > 32)) {
-                                    ALOGW("svid 0x%02x for GPS out of range", sv_info.svid);
-                                  }
-                                  break;
-                              case GNSSID_SBAS:
-                                  sv_info.constellation = GnssConstellationType::SBAS;
-                                  if ((sv_info.svid < 120) || (sv_info.svid > 192)
-                                      || ((sv_info.svid > 151) && (sv_info.svid < 183))) {
-                                    ALOGW("svid 0x%02x for SBAS out of range", sv_info.svid);
-                                  }
-                                  break;
-                              case GNSSID_GAL:
-                                  sv_info.constellation = GnssConstellationType::GALILEO;
-                                  if ((sv_info.svid < 1) || (sv_info.svid > 36)) {
-                                    ALOGW("svid 0x%02x for GALILEO out of range", sv_info.svid);
-                                  }
-                                  break;
-                              case GNSSID_BD:
-                                  sv_info.constellation = GnssConstellationType::BEIDOU;
-                                  if ((sv_info.svid < 1) || (sv_info.svid > 37)) {
-                                    ALOGW("svid 0x%02x for BEIDOU out of range", sv_info.svid);
-                                  }
-                                  break;
-                              case GNSSID_QZSS:
-                                  sv_info.constellation = GnssConstellationType::QZSS;
-                                  if ((sv_info.svid < 193) || (sv_info.svid > 200)) {
-                                    ALOGW("svid 0x%02x for QZSS out of range", sv_info.svid);
-                                  }
-                                  break;
-                              case GNSSID_GLO:
-                                  sv_info.constellation = GnssConstellationType::GLONASS;
-                                  if ((sv_info.svid < 1) || (sv_info.svid > 106)
-                                      || ((sv_info.svid > 24) && (sv_info.svid < 93))) {
-                                    ALOGW("svid 0x%02x for GLONASS out of range", sv_info.svid);
-                                  }
-                                  break;
-                              case GNSSID_IMES:
-                              case GNSSID_IRNSS:
-                              case GNSSID_CNT:
-                              default:
-                                  ALOGW("satellite with unknown constellation %d", sat.gnssid);
-                                  sv_info.constellation = GnssConstellationType::UNKNOWN;
-                                  break;
-                          }
-                          sv_info.cN0Dbhz = sat.ss > 0 ? sat.ss : 0;
-                          sv_info.elevationDegrees = 0;
-                          sv_info.azimuthDegrees = 0;
-                          sv_info.carrierFrequencyHz = 0;
-                          sv_info.svFlag = 0;
-
-                          if (!std::isnan(sat.elevation) && !std::isnan(sat.azimuth)) {
-                              sv_info.elevationDegrees = sat.elevation;
-                              sv_info.azimuthDegrees = sat.azimuth;
-                              sv_info.svFlag |= GnssSvFlags::HAS_EPHEMERIS_DATA
-                                                | GnssSvFlags::HAS_ALMANAC_DATA;
-                          }
-
-                          if (mGnssConfiguration->isBlacklisted(sv_info)) {
-                              ALOGI("SV 0x%02x is blacklisted", sat.svid);
-                          } else if (sat.used) {
-                            sv_info.svFlag |= GnssSvFlags::USED_IN_FIX;
-                          }
-                          ALOGD("SvInfo[%d] svid=0x%02x, constellation=%hhd, used=%s, "
-                                "elevation=%f, azimuth=%f, SNR=%f, carrier freq=%f",
-                                i, sv_info.svid, sv_info.constellation,
-                                sv_info.svFlag & GnssSvFlags::USED_IN_FIX ? "yes" : "no",
-                                sv_info.elevationDegrees, sv_info.azimuthDegrees,
-                                sv_info.cN0Dbhz, sv_info.carrierFrequencyHz);
-                      }
-                      this->reportSvStatus(svStatus);
-                      gps_data.set &= ~SATELLITE_SET;
                   }
               }
-            } else {
-              ALOGD("...gps_waiting timed out: %s", strerror(errno));
-              if (gps_data.set & ERROR_SET) {
-                ALOGE("gps_data error: %s", gps_data.error);
-              }
-              // TODO: check whether socket is still open
-            }
-        }
 
-        // Close the GPS if it was successfully opened.
-        if (gpsopen == 0) {
-            gps_stream(&gps_data, WATCH_DISABLE, NULL);
-            gps_close(&gps_data);
-        }
-        ALOGE("GPS THREAD STOPPED %s", oss.str().c_str());
+
+              // Wait for data from gpsd, then process it.
+              if (!gps_waiting(&gps_data, 2000000)) {
+                  ALOGW("waiting for gps data timed out");
+                  if (gps_data.set & ERROR_SET) {
+                    ALOGE("gps_data error: %s", gps_data.error);
+                  }
+                  continue;
+              }
+
+              errno = 0;
+              int read = gps_read(&gps_data, NULL, 0);
+              if (read != 0) {
+                char error_str[256];
+                ALOGW("reading from gps socket failed: %s",
+                      (read == -2) ? "EOF" : strerror_r(errno, error_str, sizeof(error_str)));
+
+                gps_close(&gps_data);
+                gpsopen = -1;
+                continue;
+              }
+
+              ALOGD("set=0x%012lx, set_pending=0x%012lx. "
+                    "Fix: status=%d, mode=%d, time=%ld, lat=%e, lon=%e, alt=%e, speed=%e, track=%e "
+                    "Accuracy: h=%e, v=%e, speed=%e, track=%e "
+                    "using %d/%d satellites. device used %.128s",
+                    gps_data.set, gps_data.set_pending,
+                    gps_data.fix.status, gps_data.fix.mode, gps_data.fix.time.tv_sec,
+                    gps_data.fix.latitude, gps_data.fix.longitude, gps_data.fix.altHAE,
+                    gps_data.fix.speed, gps_data.fix.track,
+                    gps_data.fix.eph, gps_data.fix.epv, gps_data.fix.eps, gps_data.fix.epd,
+                    gps_data.satellites_used, gps_data.satellites_visible,
+                    gps_data.dev.path);
+
+              if (gps_data.fix.mode >= MODE_2D) {
+
+                  location.gnssLocationFlags = 0;
+                  location.timestamp = 0;
+
+                  if ((gps_data.set & TIME_SET)
+                      && (gps_data.set & LATLON_SET)
+                      && (gps_data.set & HERR_SET)) {
+                      location.timestamp = (int64_t)gps_data.fix.time.tv_sec * 1000 +
+                                           gps_data.fix.time.tv_nsec / 1000000;
+
+                      location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_LAT_LONG;
+                      location.latitudeDegrees = gps_data.fix.latitude;
+                      location.longitudeDegrees = gps_data.fix.longitude;
+
+                      location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_HORIZONTAL_ACCURACY;
+                      location.horizontalAccuracyMeters = gps_data.fix.eph;
+
+                      // Every 30 seconds, store current coordinates to persist property.
+                      if (is_automotive &&
+                          gps_data.fix.time.tv_sec > last_recorded_fix + 30){
+                          last_recorded_fix = gps_data.fix.time.tv_sec;
+                          snprintf(dtos, sizeof(dtos), "%lf", gps_data.fix.latitude);
+                          property_set("persist.service.gpsd.latitude", dtos);
+                          snprintf(dtos, sizeof(dtos), "%lf", gps_data.fix.longitude);
+                          property_set("persist.service.gpsd.longitude", dtos);
+                      }
+                  }
+
+                  if ((gps_data.set & SPEED_SET) && (gps_data.set & SPEEDERR_SET)) {
+                      location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_SPEED;
+                      location.speedMetersPerSec = gps_data.fix.speed;
+
+                      location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_SPEED_ACCURACY;
+                      location.speedAccuracyMetersPerSecond = gps_data.fix.eps;
+                  }
+
+                  if ((gps_data.set & TRACK_SET) && (gps_data.set & TRACKERR_SET)) {
+                      location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_BEARING;
+                      location.bearingDegrees = gps_data.fix.track;
+
+                      location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_BEARING_ACCURACY;
+                      location.bearingAccuracyDegrees = gps_data.fix.epd;
+                  }
+
+                  if ((gps_data.set & ALTITUDE_SET) && (gps_data.set & VERR_SET)) {
+                      location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_ALTITUDE;
+                      location.altitudeMeters = gps_data.fix.altHAE;
+
+                      location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_VERTICAL_ACCURACY;
+                      location.verticalAccuracyMeters = gps_data.fix.epv;
+                  }
+
+                  if ((location.timestamp == 0)
+                      ||!(location.gnssLocationFlags & V1_0::GnssLocationFlags::HAS_LAT_LONG)
+                      //|| !(location.gnssLocationFlags & V1_0::GnssLocationFlags::HAS_SPEED)
+                      //|| !(location.gnssLocationFlags & V1_0::GnssLocationFlags::HAS_BEARING)
+                      || !(location.gnssLocationFlags & V1_0::GnssLocationFlags::HAS_ALTITUDE)
+                      //|| !(gps_data.set & SATELLITE_SET)
+                      //|| (gps_data.satellites_used == 0)
+                      ) {
+                      ALOGI("will not report location: don't have all data (have 0x%02x)",
+                            location.gnssLocationFlags);
+                  } else if ((last_report_ms + mMinIntervalMs) > location.timestamp) {
+                      ALOGI("will not report location: too early now: %ld, next report due: %ld",
+                            location.timestamp, last_report_ms + mMinIntervalMs);
+                  } else {
+                      last_report_ms = location.timestamp;
+
+                      gps_data.set &= ~(LATLON_SET | HERR_SET | SPEED_SET | SPEEDERR_SET
+                                        | TRACK_SET | TRACKERR_SET | ALTITUDE_SET | VERR_SET
+                                        | TIME_SET);
+                      gps_clear_fix(&gps_data.fix);
+                      this->reportLocation(location);
+                  }
+              }
+
+              if ((gps_data.set & SATELLITE_SET) && (gps_data.satellites_visible > 0)) {
+                  GnssSvStatus svStatus = { };
+                  memset(&svStatus, 0, sizeof(svStatus));
+
+                  svStatus.numSvs = gps_data.satellites_visible;
+                  if (svStatus.numSvs > svStatus.gnssSvList.size()) {
+                      svStatus.numSvs = svStatus.gnssSvList.size();
+                  }
+
+                  for (uint32_t i = 0; i < svStatus.numSvs; i++){
+                      GnssSvInfo &sv_info = svStatus.gnssSvList[i];
+                      const satellite_t &sat = gps_data.skyview[i];
+
+                      ALOGV("Satelite[%d] svid=0x%02x, constellation=%d, used=%s, "
+                            "elevation=%f, azimuth=%f, SNR=%f, carrier freq=%d",
+                            i, sat.svid, sat.gnssid, sat.used ? "yes" : "no",
+                            sat.elevation, sat.azimuth, sat.ss, sat.freqid);
+
+                      sv_info.svid = sat.svid;
+                      switch (sat.gnssid) {
+                          case GNSSID_GPS:
+                              sv_info.constellation = GnssConstellationType::GPS;
+                              if ((sv_info.svid < 1) || (sv_info.svid > 32)) {
+                                ALOGW("svid 0x%02x for GPS out of range", sv_info.svid);
+                              }
+                              break;
+                          case GNSSID_SBAS:
+                              sv_info.constellation = GnssConstellationType::SBAS;
+                              if ((sv_info.svid < 120) || (sv_info.svid > 192)
+                                  || ((sv_info.svid > 151) && (sv_info.svid < 183))) {
+                                ALOGW("svid 0x%02x for SBAS out of range", sv_info.svid);
+                              }
+                              break;
+                          case GNSSID_GAL:
+                              sv_info.constellation = GnssConstellationType::GALILEO;
+                              if ((sv_info.svid < 1) || (sv_info.svid > 36)) {
+                                ALOGW("svid 0x%02x for GALILEO out of range", sv_info.svid);
+                              }
+                              break;
+                          case GNSSID_BD:
+                              sv_info.constellation = GnssConstellationType::BEIDOU;
+                              if ((sv_info.svid < 1) || (sv_info.svid > 37)) {
+                                ALOGW("svid 0x%02x for BEIDOU out of range", sv_info.svid);
+                              }
+                              break;
+                          case GNSSID_QZSS:
+                              sv_info.constellation = GnssConstellationType::QZSS;
+                              if ((sv_info.svid < 193) || (sv_info.svid > 200)) {
+                                ALOGW("svid 0x%02x for QZSS out of range", sv_info.svid);
+                              }
+                              break;
+                          case GNSSID_GLO:
+                              sv_info.constellation = GnssConstellationType::GLONASS;
+                              if ((sv_info.svid < 1) || (sv_info.svid > 106)
+                                  || ((sv_info.svid > 24) && (sv_info.svid < 93))) {
+                                ALOGW("svid 0x%02x for GLONASS out of range", sv_info.svid);
+                              }
+                              break;
+                          case GNSSID_IMES:
+                          case GNSSID_IRNSS:
+                          case GNSSID_CNT:
+                          default:
+                              ALOGW("satellite with unknown constellation %d", sat.gnssid);
+                              sv_info.constellation = GnssConstellationType::UNKNOWN;
+                              break;
+                      }
+                      sv_info.cN0Dbhz = sat.ss > 0 ? sat.ss : 0;
+                      sv_info.elevationDegrees = 0;
+                      sv_info.azimuthDegrees = 0;
+                      sv_info.carrierFrequencyHz = 0;
+                      sv_info.svFlag = 0;
+
+                      if (!std::isnan(sat.elevation) && !std::isnan(sat.azimuth)) {
+                          sv_info.elevationDegrees = sat.elevation;
+                          sv_info.azimuthDegrees = sat.azimuth;
+                          sv_info.svFlag |= GnssSvFlags::HAS_EPHEMERIS_DATA
+                                            | GnssSvFlags::HAS_ALMANAC_DATA;
+                      }
+
+                      if (mGnssConfiguration->isBlacklisted(sv_info)) {
+                          ALOGI("SV 0x%02x is blacklisted", sat.svid);
+                      } else if (sat.used) {
+                          sv_info.svFlag |= GnssSvFlags::USED_IN_FIX;
+                      }
+                      ALOGV("SvInfo[%d] svid=0x%02x, constellation=%hhd, used=%s, "
+                            "elevation=%f, azimuth=%f, SNR=%f, carrier freq=%f",
+                            i, sv_info.svid, sv_info.constellation,
+                            sv_info.svFlag & GnssSvFlags::USED_IN_FIX ? "yes" : "no",
+                            sv_info.elevationDegrees, sv_info.azimuthDegrees,
+                            sv_info.cN0Dbhz, sv_info.carrierFrequencyHz);
+                  }
+                  this->reportSvStatus(svStatus);
+                  gps_data.set &= ~SATELLITE_SET;
+              }
+          }
+
+          // Close the GPS if it was successfully opened.
+          if (gpsopen == 0) {
+              gps_stream(&gps_data, WATCH_DISABLE, NULL);
+              gps_close(&gps_data);
+          }
+          ALOGE("GPS THREAD STOPPED %s", oss.str().c_str());
     });
+
     std::ostringstream oss;
     oss << mThread.get_id();
     ALOGE("started thread %s", oss.str().c_str());
