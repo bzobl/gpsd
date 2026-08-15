@@ -100,10 +100,12 @@ Return<bool> Gnss::start() {
           memset(&gps_data, 0, sizeof(gps_data));
 
           while (mIsActive == true) {
+              errno = 0;
+
               // If the connection to GPSd is not open, try to open it.
               // If the attempt to open it fails, sleep 5 seconds and try again.
               if (gpsopen != 0){
-                  ALOGD("%s: gpsd_host: %s, gpsd_port: %s", __func__, gpsdhost, gpsdport);
+                  ALOGD("attempting to connect to gpsd_host: %s, gpsd_port: %s", gpsdhost, gpsdport);
                   gpsopen = gps_open(gpsdhost, gpsdport, &gps_data);
                   if (gpsopen != 0) {
                       ALOGW("%s: gps_open FAIL (%d). Trying again in 5 seconds.", __func__, gpsopen);
@@ -111,7 +113,8 @@ Return<bool> Gnss::start() {
                       continue;
                   }
 
-                  ALOGV("%s: gps_open SUCCESS", __func__);
+                  ALOGD("gps_open SUCCESS");
+
                   if (gps_stream(&gps_data, WATCH_ENABLE, NULL) != 0) {
                     ALOGW("gps_stream failed: %s", strerror(errno));
                     gps_close(&gps_data);
@@ -123,18 +126,17 @@ Return<bool> Gnss::start() {
 
               // Wait for data from gpsd, then process it.
               if (!gps_waiting(&gps_data, 2000000)) {
-                  ALOGW("waiting for gps data timed out");
-                  if (gps_data.set & ERROR_SET) {
-                    ALOGE("gps_data error: %s", gps_data.error);
-                  }
+                  ALOGW("waiting for gps data timed out: %s",
+                        (gps_data.set & ERROR_SET) ? gps_data.error : "-");
                   continue;
               }
 
-              errno = 0;
               int read = gps_read(&gps_data, NULL, 0);
-              if (read != 0) {
+              if (read < 0) {
                 char error_str[256];
-                ALOGW("reading from gps socket failed: %s",
+                ALOGW("reading from gps socket failed (%d): %s (%s)",
+                      read,
+                      (gps_data.set & ERROR_SET) ? gps_data.error : "-",
                       (read == -2) ? "EOF" : strerror_r(errno, error_str, sizeof(error_str)));
 
                 gps_close(&gps_data);
