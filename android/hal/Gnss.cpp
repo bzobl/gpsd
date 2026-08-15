@@ -82,7 +82,8 @@ Return<bool> Gnss::start() {
         if (is_automotive && property_get("persist.service.gpsd.latitude", gpslat, "") > 0
                           && property_get("persist.service.gpsd.longitude", gpslon, "") > 0){
               location.gnssLocationFlags = 0;
-              location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_LAT_LONG;
+              location.gnssLocationFlags |= V1_0::GnssLocationFlags::HAS_LAT_LONG
+                                            | V1_0::GnssLocationFlags::HAS_HORIZONTAL_ACCURACY;
               location.latitudeDegrees = atof(gpslat);
               location.longitudeDegrees = atof(gpslon);
               location.altitudeMeters = 0.0;
