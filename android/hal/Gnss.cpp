@@ -398,10 +398,7 @@ Return<bool> Gnss::setPositionMode(GnssPositionMode mode, GnssPositionRecurrence
           recurrence == GnssPositionRecurrence::RECURRENCE_SINGLE ? "SINGLE" : "PERIODIC",
           minIntervalMs, preferredAccuracyMeters, preferredTimeMs);
 
-    std::unique_lock<std::mutex> lock(mMutex);
-    mMinIntervalMs = minIntervalMs;
-
-    return true;
+    return false;
 }
 
 Return<sp<::android::hardware::gnss::V1_0::IAGnssRil>> Gnss::getExtensionAGnssRil() {
